@@ -296,59 +296,77 @@
   const durationBtns    = document.querySelectorAll('.duration-btn');
 
   // ── Audio ──────────────────────────────────────────────────────────────────
-  // iOS rule: AudioContext must be created + unlocked inside a user-gesture.
-  // Oscillators scheduled in the future from setInterval get silently blocked.
-  //
-  // Solution: pre-render the entire 3-beep sequence into ONE AudioBuffer during
-  // the user-gesture (ensureAudio). Then in tick() we just call bufferSource.start()
-  // with no scheduling — iOS allows that even outside a gesture.
+  // iOS suspends AudioContext whenever there's no active audio graph.
+  // A timer that runs for 60s will have a suspended context by the time it ends.
+  // Fix: keep a silent looping buffer running the whole time the timer is active —
+  // iOS never suspends a context with an active source node.
 
-  let audioCtx     = null;
-  let beepBuffer   = null;   // pre-rendered 3-beep AudioBuffer
+  let audioCtx      = null;
+  let beepBuffer    = null;
+  let silentSource  = null;   // looping silent node that keeps context alive
 
-  function renderBeepBuffer(ctx) {
-    // Beep spec: [freq, startSec, durationSec, volume]
-    const beeps = [
-      [880,  0.00, 0.18, 0.7],
-      [880,  0.32, 0.18, 0.7],
-      [1100, 0.64, 0.35, 0.8],
+  function buildBeepBuffer(ctx) {
+    const sr   = ctx.sampleRate;
+    const spec = [
+      { freq: 880,  start: 0.00, dur: 0.18, vol: 0.8 },
+      { freq: 880,  start: 0.35, dur: 0.18, vol: 0.8 },
+      { freq: 1320, start: 0.70, dur: 0.30, vol: 0.9 },
     ];
-    const totalLen = 1.2; // seconds
-    const sr       = ctx.sampleRate;
-    const buf      = ctx.createBuffer(1, Math.ceil(totalLen * sr), sr);
-    const data     = buf.getChannelData(0);
+    const totalSamples = Math.ceil(1.3 * sr);
+    const buf  = ctx.createBuffer(1, totalSamples, sr);
+    const data = buf.getChannelData(0);
 
-    for (const [freq, start, dur, vol] of beeps) {
-      const startSample = Math.floor(start * sr);
-      const durSamples  = Math.floor(dur   * sr);
-      for (let i = 0; i < durSamples; i++) {
-        const t       = i / sr;
-        const env     = Math.min(t / 0.01, 1) *           // 10ms attack
-                        Math.min((dur - t) / 0.04, 1);    // 40ms release
-        data[startSample + i] += Math.sin(2 * Math.PI * freq * t) * vol * env;
+    for (const { freq, start, dur, vol } of spec) {
+      const s0 = Math.floor(start * sr);
+      const sN = Math.floor(dur   * sr);
+      for (let i = 0; i < sN; i++) {
+        const t   = i / sr;
+        // smooth attack (5ms) and release (30ms)
+        const att = Math.min(t / 0.005, 1);
+        const rel = Math.min((dur - t) / 0.030, 1);
+        data[s0 + i] += Math.sin(2 * Math.PI * freq * t) * vol * att * rel;
       }
     }
     return buf;
   }
 
-  function ensureAudio() {
-    if (!audioCtx) {
-      audioCtx   = new (window.AudioContext || window.webkitAudioContext)();
-      beepBuffer = renderBeepBuffer(audioCtx);
-    }
-    if (audioCtx.state === 'suspended') {
-      audioCtx.resume();
-    }
+  function buildSilentBuffer(ctx) {
+    // 1-sample silent buffer — looped forever keeps context from suspending
+    const buf  = ctx.createBuffer(1, 1, ctx.sampleRate);
+    return buf;
   }
 
-  // Called from tick() — no scheduling, just immediate .start()
+  function ensureAudio() {
+    // Must be called from a user-gesture handler
+    if (!audioCtx) {
+      audioCtx   = new (window.AudioContext || window.webkitAudioContext)();
+      beepBuffer = buildBeepBuffer(audioCtx);
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function startKeepAlive() {
+    if (!audioCtx || silentSource) return;
+    silentSource        = audioCtx.createBufferSource();
+    silentSource.buffer = buildSilentBuffer(audioCtx);
+    silentSource.loop   = true;
+    silentSource.connect(audioCtx.destination);
+    silentSource.start();
+  }
+
+  function stopKeepAlive() {
+    if (!silentSource) return;
+    try { silentSource.stop(); } catch (_) {}
+    silentSource.disconnect();
+    silentSource = null;
+  }
+
   function playFinishBeeps() {
     if (!audioCtx || !beepBuffer) return;
-    // Re-render if somehow lost
     const src = audioCtx.createBufferSource();
     src.buffer = beepBuffer;
     src.connect(audioCtx.destination);
-    src.start();   // immediate — iOS allows this
+    src.start();
   }
 
   function flashDisplay() {
@@ -411,8 +429,8 @@
         finishing  = false;
         remaining  = totalSeconds;
         updateDisplay();
-        // Restart immediately — no tap needed
         setRunningUI(true);
+        startKeepAlive();              // re-arm keep-alive for the new cycle
         intervalId = setInterval(tick, 1000);
       }, 1400);
     }
@@ -424,18 +442,21 @@
       updateDisplay();
     }
     setRunningUI(true);
+    startKeepAlive();                    // keep context alive for the whole countdown
     intervalId = setInterval(tick, 1000);
   }
 
   function pauseTimer() {
     clearInterval(intervalId);
     intervalId = null;
+    stopKeepAlive();
     setRunningUI(false);
   }
 
   function resetTimer() {
     clearInterval(intervalId);
     intervalId = null;
+    stopKeepAlive();
     finishing  = false;
     remaining  = totalSeconds;
     running    = false;
