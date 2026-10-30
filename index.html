@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Timer" />
+  <meta name="theme-color" content="#000000" />
+  <link rel="manifest" href="timer.webmanifest" />
+  <!-- iOS home screen icon -->
+  <link rel="apple-touch-icon" href="icon-512.png" />
+  <title>Circle Timer</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body {
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      /* Use dvh so it fills the screen correctly on mobile (avoids browser chrome overlap) */
+      height: 100dvh;
+      height: 100vh; /* fallback */
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+      overflow: hidden;
+    }
+
+    .timer-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      height: 100%;
+      width: 100%;
+      padding: env(safe-area-inset-top, 50px) 0 calc(env(safe-area-inset-bottom, 0px) + 50px);
+    }
+
+    .spacer { flex: 1; }
+
+    /* ── Circle ── */
+    .circle-container {
+      position: relative;
+      width: min(320px, 80vw);
+      height: min(320px, 80vw);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    svg.ring {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      transform: rotate(-90deg);
+    }
+
+    .ring-track {
+      fill: none;
+      stroke: #1c1c1e;
+      stroke-width: 16;
+    }
+
+    .ring-progress {
+      fill: none;
+      stroke: #ff9f0a;
+      stroke-width: 16;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 1s linear, stroke 0.4s ease;
+    }
+
+    .ring-progress.warning { stroke: #ff453a; }
+
+    /* ── Center text ── */
+    .center-display {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .time-text {
+      font-size: clamp(56px, 18vw, 80px);
+      font-weight: 200;
+      color: #fff;
+      letter-spacing: -4px;
+      line-height: 1;
+      transition: color 0.4s ease;
+    }
+
+    .time-text.warning { color: #ff453a; }
+
+    .time-label {
+      font-size: 13px;
+      font-weight: 400;
+      color: #636366;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+    }
+
+    /* ── Controls ── */
+    .controls {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 24px;
+      width: 100%;
+      padding: 0 40px;
+    }
+
+    .duration-picker {
+      display: flex;
+      gap: 12px;
+    }
+
+    .duration-btn {
+      width: 76px;
+      height: 40px;
+      border-radius: 20px;
+      border: 2px solid #3a3a3c;
+      background: transparent;
+      color: #8e8e93;
+      font-size: 15px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      font-family: inherit;
+    }
+
+    .duration-btn.active {
+      border-color: #ff9f0a;
+      background: rgba(255, 159, 10, 0.15);
+      color: #ff9f0a;
+    }
+
+    .action-row {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+    }
+
+    .btn-reset {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      border: none;
+      background: #1c1c1e;
+      color: #aeaeb2;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s ease, transform 0.1s ease;
+    }
+
+    /* SVG icon inside reset button */
+    .btn-reset svg { width: 24px; height: 24px; }
+    .btn-reset:active { transform: scale(0.93); background: #2c2c2e; }
+
+    .btn-start {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      border: none;
+      background: #ff9f0a;
+      color: #000;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s ease, transform 0.1s ease, box-shadow 0.2s ease;
+      box-shadow: 0 0 24px rgba(255, 159, 10, 0.35);
+    }
+
+    /* SVG icons inside start button */
+    .btn-start svg { width: 28px; height: 28px; }
+    .btn-start .icon-play  { display: block; }
+    .btn-start .icon-pause { display: none; }
+
+    .btn-start.running .icon-play  { display: none; }
+    .btn-start.running .icon-pause { display: block; }
+
+    .btn-start:active { transform: scale(0.93); }
+    .btn-start.running {
+      background: #1c1c1e;
+      color: #aeaeb2;
+      box-shadow: none;
+    }
+
+    /* ── Pulse ring ── */
+    @keyframes pulse-ring {
+      0%   { box-shadow: 0 0 0 0 rgba(255, 159, 10, 0.45); }
+      70%  { box-shadow: 0 0 0 20px rgba(255, 159, 10, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(255, 159, 10, 0); }
+    }
+
+    .circle-container.running::after {
+      content: '';
+      position: absolute;
+      width: 100%; height: 100%;
+      border-radius: 50%;
+      animation: pulse-ring 2s ease-out infinite;
+      pointer-events: none;
+    }
+
+    /* ── Beep flash ── */
+    @keyframes beep-flash {
+      0%   { opacity: 1; }
+      40%  { opacity: 0.15; }
+      100% { opacity: 1; }
+    }
+    .beep-flash { animation: beep-flash 0.22s ease-in-out; }
+  </style>
+</head>
+<body>
+
+<div class="timer-wrapper">
+  <div class="spacer"></div>
+
+  <div class="circle-container" id="circleContainer">
+    <svg class="ring" viewBox="0 0 320 320">
+      <circle class="ring-track"    cx="160" cy="160" r="144" />
+      <circle class="ring-progress" cx="160" cy="160" r="144" id="ringProgress" />
+    </svg>
+    <div class="center-display">
+      <div class="time-text" id="timeDisplay">1:00</div>
+      <div class="time-label"  id="timeLabel">tap to start</div>
+    </div>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="controls">
+    <div class="duration-picker">
+      <button class="duration-btn active" data-sec="60">60s</button>
+      <button class="duration-btn"        data-sec="90">90s</button>
+      <button class="duration-btn"        data-sec="120">2:00</button>
+    </div>
+    <div class="action-row">
+
+      <!-- Reset: arrow-counterclockwise icon (no emoji) -->
+      <button class="btn-reset" id="btnReset" title="Reset">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+          <path d="M3 3v5h5"/>
+        </svg>
+      </button>
+
+      <!-- Start/Pause: pure SVG shapes, no emoji/unicode -->
+      <button class="btn-start" id="btnStart">
+        <!-- Play triangle -->
+        <svg class="icon-play" viewBox="0 0 24 24" fill="currentColor">
+          <polygon points="6,3 20,12 6,21"/>
+        </svg>
+        <!-- Pause two bars -->
+        <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor">
+          <rect x="5"  y="3" width="4" height="18" rx="1"/>
+          <rect x="15" y="3" width="4" height="18" rx="1"/>
+        </svg>
+      </button>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── State ──────────────────────────────────────────────────────────────────
+  let totalSeconds = 60;
+  let remaining    = 60;
+  let running      = false;
+  let intervalId   = null;
+  let finishing    = false; // guard: ignore taps while beeping + auto-restart
+
+  const R            = 144;
+  const CIRCUMFERENCE = 2 * Math.PI * R;
+
+  const ringProgress    = document.getElementById('ringProgress');
+  const timeDisplay     = document.getElementById('timeDisplay');
+  const timeLabel       = document.getElementById('timeLabel');
+  const btnStart        = document.getElementById('btnStart');
+  const btnReset        = document.getElementById('btnReset');
+  const circleContainer = document.getElementById('circleContainer');
+  const durationBtns    = document.querySelectorAll('.duration-btn');
+
+  // ── Audio ──────────────────────────────────────────────────────────────────
+  // iOS rule: AudioContext must be created + unlocked inside a user-gesture.
+  // Oscillators scheduled in the future from setInterval get silently blocked.
+  //
+  // Solution: pre-render the entire 3-beep sequence into ONE AudioBuffer during
+  // the user-gesture (ensureAudio). Then in tick() we just call bufferSource.start()
+  // with no scheduling — iOS allows that even outside a gesture.
+
+  let audioCtx     = null;
+  let beepBuffer   = null;   // pre-rendered 3-beep AudioBuffer
+
+  function renderBeepBuffer(ctx) {
+    // Beep spec: [freq, startSec, durationSec, volume]
+    const beeps = [
+      [880,  0.00, 0.18, 0.7],
+      [880,  0.32, 0.18, 0.7],
+      [1100, 0.64, 0.35, 0.8],
+    ];
+    const totalLen = 1.2; // seconds
+    const sr       = ctx.sampleRate;
+    const buf      = ctx.createBuffer(1, Math.ceil(totalLen * sr), sr);
+    const data     = buf.getChannelData(0);
+
+    for (const [freq, start, dur, vol] of beeps) {
+      const startSample = Math.floor(start * sr);
+      const durSamples  = Math.floor(dur   * sr);
+      for (let i = 0; i < durSamples; i++) {
+        const t       = i / sr;
+        const env     = Math.min(t / 0.01, 1) *           // 10ms attack
+                        Math.min((dur - t) / 0.04, 1);    // 40ms release
+        data[startSample + i] += Math.sin(2 * Math.PI * freq * t) * vol * env;
+      }
+    }
+    return buf;
+  }
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      audioCtx   = new (window.AudioContext || window.webkitAudioContext)();
+      beepBuffer = renderBeepBuffer(audioCtx);
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  }
+
+  // Called from tick() — no scheduling, just immediate .start()
+  function playFinishBeeps() {
+    if (!audioCtx || !beepBuffer) return;
+    // Re-render if somehow lost
+    const src = audioCtx.createBufferSource();
+    src.buffer = beepBuffer;
+    src.connect(audioCtx.destination);
+    src.start();   // immediate — iOS allows this
+  }
+
+  function flashDisplay() {
+    timeDisplay.classList.add('beep-flash');
+    setTimeout(() => timeDisplay.classList.remove('beep-flash'), 240);
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function formatTime(sec) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `${s}`;
+  }
+
+  function setArcProgress(ratio) {
+    ringProgress.style.strokeDasharray  = CIRCUMFERENCE;
+    ringProgress.style.strokeDashoffset = CIRCUMFERENCE * (1 - ratio);
+  }
+
+  function applyWarning(on) {
+    ringProgress.classList.toggle('warning', on);
+    timeDisplay.classList.toggle('warning', on);
+  }
+
+  function updateDisplay() {
+    timeDisplay.textContent = formatTime(remaining);
+    setArcProgress(remaining / totalSeconds);
+    applyWarning(remaining <= 10 && remaining > 0);
+  }
+
+  function setRunningUI(isRunning) {
+    running = isRunning;
+    btnStart.classList.toggle('running', isRunning);
+    circleContainer.classList.toggle('running', isRunning);
+    timeLabel.textContent = isRunning ? 'remaining' : (remaining === totalSeconds ? 'tap to start' : 'paused');
+  }
+
+  // ── Timer logic ────────────────────────────────────────────────────────────
+  function tick() {
+    if (remaining <= 0) return;
+    remaining--;
+    updateDisplay();
+
+    if (remaining === 0) {
+      // Stop ticking
+      clearInterval(intervalId);
+      intervalId = null;
+      finishing  = true;
+
+      setRunningUI(false);
+      applyWarning(false);
+      timeLabel.textContent = 'done!';
+
+      // Play 3 beeps (audioCtx is alive from the gesture that started the timer)
+      playFinishBeeps();
+      [0, 300, 600].forEach(d => setTimeout(flashDisplay, d));
+
+      // Auto-restart the NEXT cycle automatically after beeps finish
+      setTimeout(() => {
+        finishing  = false;
+        remaining  = totalSeconds;
+        updateDisplay();
+        // Restart immediately — no tap needed
+        setRunningUI(true);
+        intervalId = setInterval(tick, 1000);
+      }, 1400);
+    }
+  }
+
+  function startTimer() {
+    if (remaining === 0) {
+      remaining = totalSeconds;
+      updateDisplay();
+    }
+    setRunningUI(true);
+    intervalId = setInterval(tick, 1000);
+  }
+
+  function pauseTimer() {
+    clearInterval(intervalId);
+    intervalId = null;
+    setRunningUI(false);
+  }
+
+  function resetTimer() {
+    clearInterval(intervalId);
+    intervalId = null;
+    finishing  = false;
+    remaining  = totalSeconds;
+    running    = false;
+    applyWarning(false);
+    updateDisplay();
+    timeLabel.textContent = 'tap to start';
+    btnStart.classList.remove('running');
+    circleContainer.classList.remove('running');
+  }
+
+  // ── Events ─────────────────────────────────────────────────────────────────
+  btnStart.addEventListener('click', () => {
+    if (finishing) return;
+    ensureAudio();   // unlock + pre-render buffer on first tap, re-resume if suspended
+    if (running) {
+      pauseTimer();
+    } else {
+      startTimer();
+    }
+  });
+
+  btnReset.addEventListener('click', () => {
+    ensureAudio();
+    resetTimer();
+  });
+
+  durationBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      ensureAudio();
+      if (running) pauseTimer();
+      finishing = false;
+      durationBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      totalSeconds = parseInt(btn.dataset.sec, 10);
+      remaining    = totalSeconds;
+      updateDisplay();
+      timeLabel.textContent = 'tap to start';
+    });
+  });
+
+  // ── Init ───────────────────────────────────────────────────────────────────
+  setArcProgress(1);
+  updateDisplay();
+</script>
+</body>
+</html>
