@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Timer" />
+  <meta name="apple-mobile-web-app-title" content="Sport Timer" />
   <meta name="theme-color" content="#000000" />
   <link rel="manifest" href="timer.webmanifest" />
   <!-- iOS home screen icon -->
@@ -394,7 +394,7 @@
   function updateDisplay() {
     timeDisplay.textContent = formatTime(remaining);
     setArcProgress(remaining / totalSeconds);
-    applyWarning(remaining <= 10 && remaining > 0);
+    applyWarning(remaining <= Math.floor(totalSeconds * 0.3) && remaining > 0);
   }
 
   function setRunningUI(isRunning) {
