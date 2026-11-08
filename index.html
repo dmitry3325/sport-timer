@@ -430,7 +430,8 @@
         remaining  = totalSeconds;
         updateDisplay();
         setRunningUI(true);
-        startKeepAlive();              // re-arm keep-alive for the new cycle
+        startKeepAlive();
+        requestWakeLock();
         intervalId = setInterval(tick, 1000);
       }, 1400);
     }
@@ -442,7 +443,8 @@
       updateDisplay();
     }
     setRunningUI(true);
-    startKeepAlive();                    // keep context alive for the whole countdown
+    startKeepAlive();
+    requestWakeLock();
     intervalId = setInterval(tick, 1000);
   }
 
@@ -450,6 +452,7 @@
     clearInterval(intervalId);
     intervalId = null;
     stopKeepAlive();
+    releaseWakeLock();
     setRunningUI(false);
   }
 
@@ -457,6 +460,7 @@
     clearInterval(intervalId);
     intervalId = null;
     stopKeepAlive();
+    releaseWakeLock();
     finishing  = false;
     remaining  = totalSeconds;
     running    = false;
@@ -465,6 +469,27 @@
     timeLabel.textContent = 'tap to start';
     btnStart.classList.remove('running');
     circleContainer.classList.remove('running');
+  }
+
+  // ── Wake Lock ──────────────────────────────────────────────────────────────
+  // Prevents the phone screen from going dark while the timer is running.
+  let wakeLock = null;
+
+  async function requestWakeLock() {
+    if (!('wakeLock' in navigator)) return;
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      // Re-acquire if the page becomes visible again (e.g. user switches back)
+      document.addEventListener('visibilitychange', async () => {
+        if (document.visibilityState === 'visible' && running) {
+          try { wakeLock = await navigator.wakeLock.request('screen'); } catch (_) {}
+        }
+      });
+    } catch (_) {}
+  }
+
+  function releaseWakeLock() {
+    if (wakeLock) { wakeLock.release(); wakeLock = null; }
   }
 
   // ── Events ─────────────────────────────────────────────────────────────────
