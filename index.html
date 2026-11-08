@@ -46,6 +46,36 @@
 
     .spacer { flex: 1; }
 
+    /* ── Top stats bar ── */
+    .stats-bar {
+      width: 100%;
+      padding: 0 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .stat-round {
+      font-size: 15px;
+      font-weight: 600;
+      color: #ff9f0a;
+      letter-spacing: 0.3px;
+    }
+
+    .stat-round span {
+      font-weight: 300;
+      color: #636366;
+    }
+
+    .stat-time {
+      font-size: 15px;
+      font-weight: 300;
+      color: #636366;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.5px;
+    }
+
     /* ── Circle ── */
     .circle-container {
       position: relative;
@@ -227,6 +257,13 @@
 <body>
 
 <div class="timer-wrapper">
+
+  <!-- Top stats -->
+  <div class="stats-bar">
+    <div class="stat-round">Round <span id="roundNum">1</span></div>
+    <div class="stat-time" id="totalTime">0:00</div>
+  </div>
+
   <div class="spacer"></div>
 
   <div class="circle-container" id="circleContainer">
@@ -282,7 +319,10 @@
   let remaining    = 60;
   let running      = false;
   let intervalId   = null;
-  let finishing    = false; // guard: ignore taps while beeping + auto-restart
+  let finishing    = false;
+
+  let round        = 1;
+  let totalElapsed = 0;   // seconds accumulated across all rounds
 
   const R            = 144;
   const CIRCUMFERENCE = 2 * Math.PI * R;
@@ -294,6 +334,15 @@
   const btnReset        = document.getElementById('btnReset');
   const circleContainer = document.getElementById('circleContainer');
   const durationBtns    = document.querySelectorAll('.duration-btn');
+  const roundNumEl      = document.getElementById('roundNum');
+  const totalTimeEl     = document.getElementById('totalTime');
+
+  function updateStatsBar() {
+    roundNumEl.textContent = round;
+    const m = Math.floor(totalElapsed / 60);
+    const s = totalElapsed % 60;
+    totalTimeEl.textContent = `${m}:${String(s).padStart(2, '0')}`;
+  }
 
   // ── Audio ──────────────────────────────────────────────────────────────────
   // iOS suspends AudioContext whenever there's no active audio graph.
@@ -408,10 +457,11 @@
   function tick() {
     if (remaining <= 0) return;
     remaining--;
+    totalElapsed++;
     updateDisplay();
+    updateStatsBar();
 
     if (remaining === 0) {
-      // Stop ticking
       clearInterval(intervalId);
       intervalId = null;
       finishing  = true;
@@ -420,15 +470,15 @@
       applyWarning(false);
       timeLabel.textContent = 'done!';
 
-      // Play 3 beeps (audioCtx is alive from the gesture that started the timer)
       playFinishBeeps();
       [0, 300, 600].forEach(d => setTimeout(flashDisplay, d));
 
-      // Auto-restart the NEXT cycle automatically after beeps finish
       setTimeout(() => {
         finishing  = false;
+        round++;                        // next round
         remaining  = totalSeconds;
         updateDisplay();
+        updateStatsBar();
         setRunningUI(true);
         startKeepAlive();
         requestWakeLock();
@@ -461,11 +511,14 @@
     intervalId = null;
     stopKeepAlive();
     releaseWakeLock();
-    finishing  = false;
-    remaining  = totalSeconds;
-    running    = false;
+    finishing    = false;
+    remaining    = totalSeconds;
+    running      = false;
+    round        = 1;
+    totalElapsed = 0;
     applyWarning(false);
     updateDisplay();
+    updateStatsBar();
     timeLabel.textContent = 'tap to start';
     btnStart.classList.remove('running');
     circleContainer.classList.remove('running');
@@ -512,12 +565,15 @@
     btn.addEventListener('click', () => {
       ensureAudio();
       if (running) pauseTimer();
-      finishing = false;
+      finishing    = false;
+      round        = 1;
+      totalElapsed = 0;
       durationBtns.forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       totalSeconds = parseInt(btn.dataset.sec, 10);
       remaining    = totalSeconds;
       updateDisplay();
+      updateStatsBar();
       timeLabel.textContent = 'tap to start';
     });
   });
@@ -525,6 +581,7 @@
   // ── Init ───────────────────────────────────────────────────────────────────
   setArcProgress(1);
   updateDisplay();
+  updateStatsBar();
 </script>
 </body>
 </html>
